@@ -29,8 +29,8 @@ let's play with redis
 
 ## Some code and ideas was taken from following projects, thank you.
 
-- [Alejandro Crosa] (https://github.com/acrosa/scala-redis)
-- [Ezra Zygmuntowicz] (https://github.com/ezmobius/redis-rb)
+- [scala-redis] (https://github.com/acrosa/scala-redis) by Alejandro Crosa
+- [redis-rb] (https://github.com/ezmobius/redis-rb) by Ezra Zygmuntowicz
 
 
 
