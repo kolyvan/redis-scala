@@ -1,7 +1,7 @@
 package ru.kolyvan.redis
 
 
-object Utils {
+private object Utils {
   val zerobytes = new Array[Byte](0)
 
   def unexpected(x: Reply) = throw ProtocolError("unexpected reply: " + x)

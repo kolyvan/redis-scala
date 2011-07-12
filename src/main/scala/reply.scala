@@ -4,7 +4,7 @@ import java.net.SocketException
 import java.io.{ByteArrayOutputStream, InputStream}
 import scala.annotation.tailrec
 
-sealed abstract class Reply {
+private[redis] sealed abstract class Reply {
   override def toString: String = this match {
     case NullReply    => "null"
     case IntReply(i)  => ":" + i.toString
@@ -14,14 +14,14 @@ sealed abstract class Reply {
   }
 }
 
-object NullReply extends Reply
-case class IntReply(x: Int) extends Reply
-case class StrReply(x: String) extends Reply
-case class BulkReply(x: Bytes) extends Reply
-case class SeqReply(x: Seq[Reply]) extends Reply
+private object NullReply extends Reply
+private case class IntReply(x: Int) extends Reply
+private case class StrReply(x: String) extends Reply
+private case class BulkReply(x: Bytes) extends Reply
+private case class SeqReply(x: Seq[Reply]) extends Reply
 
 
-trait ReplyProc {
+private[redis] trait ReplyProc {
 
   def int(x: Reply) = x match {
     case IntReply(i)    => i

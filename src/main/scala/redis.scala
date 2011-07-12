@@ -3,7 +3,7 @@ package ru.kolyvan.redis
 import java.io.{InputStream}
 
 
-abstract class RedisOp extends Request with ReplyProc {
+sealed abstract class RedisOp extends Request with ReplyProc {
 
   protected def call[T](payload: Bytes)(rp: Reply => T): T
 
@@ -348,7 +348,7 @@ abstract class RedisOp extends Request with ReplyProc {
 
 }
 
-class Redis(conn: Connection) extends RedisOp {
+final class Redis(conn: Connection) extends RedisOp {
 
   private abstract class DelayedRedis extends RedisOp {
     type ReplyFunc = Function[Reply, Any]
