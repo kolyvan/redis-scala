@@ -7,6 +7,8 @@ import Conv._
 
 class RedisTest extends FunSuite {
 
+  // enableLog()
+
   val redis = {
     val r = mkRedis()
     r.flushdb

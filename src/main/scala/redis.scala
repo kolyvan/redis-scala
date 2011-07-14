@@ -5,6 +5,32 @@ import java.io.{InputStream}
 
 sealed abstract class RedisOp extends Request with ReplyProc {
 
+  private var dbindex = 0
+  protected def sendCmd(conn: Connection, payload: Bytes)(f: InputStream => Reply): Reply =  {
+
+    def op() = {
+      Redis.log(">> " + Utils.pp(payload))
+      conn.out.write(payload)
+      val r = f(conn.in)
+      Redis.log("<< " + r)
+      r
+    }
+
+    try { op() }
+    catch {
+			case e: java.net.SocketException =>
+        Redis.log("reconnect after %s to db #%d ".format(e.getMessage, dbindex))
+				conn.reconnect
+        if (dbindex != 0)
+          select(dbindex)
+        op()
+      case e =>
+        Redis.log("exception " + e.getMessage)
+        throw e
+		}
+
+  }
+
   protected def call[T](payload: Bytes)(rp: Reply => T): T
 
   def discard = sys.error("must be called only inside multi block")
@@ -56,8 +82,12 @@ sealed abstract class RedisOp extends Request with ReplyProc {
   def ttl(key: String): Int =
     call(plain('ttl, key))(int)
 
-  def select(index: Int): Boolean =
-    call(unified('select, index))(bool)
+  def select(index: Int): Boolean =  {
+    this.dbindex = 0 // for preventing recursive calling select during reconnectn
+    val r = call(unified('select, index))(bool)
+    this.dbindex = index
+    r
+  }
 
   def flushdb(): Boolean =
     call(plain('flushdb))(bool)
@@ -359,7 +389,7 @@ final class Redis(conn: Connection) extends RedisOp {
   private class PipelineRedis extends DelayedRedis {
 
     def call[T](payload: Bytes)(f: Reply => T): T = {
-      conn.sendCmd(payload){ _ => NullReply }
+      sendCmd(conn, payload){ _ => NullReply }
       addreply(f)
       null.asInstanceOf[T]
     }
@@ -372,7 +402,7 @@ final class Redis(conn: Connection) extends RedisOp {
   private class MultiRedis extends DelayedRedis {
 
     def call[T](payload: Bytes)(f: Reply => T): T = {
-      conn.sendCmd(payload){ inp =>
+      sendCmd(conn, payload){ inp =>
         ReplyReader.read(inp) match {
           case StrReply(s) if s == "QUEUED" => NullReply
           case x => Utils.unexpected(x)
@@ -402,15 +432,16 @@ final class Redis(conn: Connection) extends RedisOp {
   }
 
   def close = conn.close
+  def reconnect = conn.reconnect
 
   protected def call[T](payload: Bytes)(rp: Reply => T): T =
-    rp(conn.sendCmd(payload){ inp => ReplyReader.read(inp) })
+    rp(sendCmd(conn, payload){ inp => ReplyReader.read(inp) })
 
   def pipeline(f: RedisOp => Unit): Seq[Any] = {
     val p = new PipelineRedis
     f (p)
     var r: Seq[Any] = Nil
-    conn.sendCmd(Utils.zerobytes) { inp =>
+    sendCmd(conn, Utils.zerobytes) { inp =>
       r = p.exec(inp) // read replies
       NullReply
     }
