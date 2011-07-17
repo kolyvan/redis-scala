@@ -33,17 +33,38 @@ class MultiThreadTest extends FunSuite {
         new Runnable {
           def run {
             Thread.sleep(1)
-            // println("start thread " + i)
+           // println("start thread " + i)
             val key = "testkey" + i
             val cycles = minCycles + random.nextInt(rndCycles)
             for (i <- 1 to cycles) {
               val buf = new Bytes(minBufsize + random.nextInt(rndBufsize))
               random.nextBytes(buf)
               expect(true) { redis.set(key, buf) }
-              expect(true) { val x = redis.get(key); x.get sameElements  buf }
-              // println("done %s %d".format(key, i))
+              expect(true) {
+                val x = redis.get(key);
+                x.get sameElements  buf
+              }
+              expect(true) {
+                redis.pipeline { r =>
+                  r.set(key, buf)
+                  r.get(key)
+                } match {
+                  case true :: Some(x: Bytes) :: Nil => x sameElements buf
+                  case _ => fail("unexpeced result of pipeline")
+                }
+              }
+              expect(true) {
+                redis.multi { r =>
+                  r.set(key, buf)
+                  r.get(key)
+                } match {
+                  case true :: Some(x: Bytes) :: Nil => x sameElements buf
+                  case _ => fail("unexpeced result of multi")
+                }
+              }
+            //  println("done %s %d".format(key, i))
             }
-            // println("exit thread " + i)
+           // println("exit thread " + i)
           }
         })
     }

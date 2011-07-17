@@ -384,28 +384,40 @@ class Redis(conn: Connection) extends RedisOp {
     private var lock = new Lock()
 
     override protected def call[T](payload: Bytes)(f: Reply => T): T = {
-      try {
-        lock.acquire()
-        super.call(payload)(f)
-      } finally  {
+      lock.acquire()
+      try { super.call(payload)(f) }
+      finally  {
         lock.release()
       }
     }
 
     override def pipeline(f: RedisOp => Unit): Seq[Any] = {
-      try {
-        lock.acquire()
-        super.pipeline(f)
-      } finally  {
+      lock.acquire()
+      try { super.pipeline(f) }
+      finally  {
         lock.release()
       }
     }
 
     override def multi(f: RedisOp => Unit): Seq[Any] = {
+      lock.acquire()
       try {
-        lock.acquire()
-        super.multi(f)
-      } finally  {
+        if (!super.call(unified('multi))(bool))
+          throw ProtocolError("got false as multi-command reply")
+
+        val m = new MultiRedis
+        f (m)
+        super.call(unified('exec))(m.exec)
+      }
+      catch {
+        case DiscardException =>
+          super.call(unified('discard))(bool)
+          Nil
+        case e =>
+          super.call(unified('discard))(bool)
+          throw e   // rethrow
+      }
+      finally  {
         lock.release()
       }
     }
