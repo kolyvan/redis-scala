@@ -1,7 +1,7 @@
 package ru.kolyvan.redis
 
 import java.io.{InputStream}
-
+import scala.concurrent.Lock
 
 sealed abstract class RedisOp extends Request with ReplyProc {
 
@@ -378,7 +378,47 @@ sealed abstract class RedisOp extends Request with ReplyProc {
 
 }
 
-final class Redis(conn: Connection) extends RedisOp {
+class Redis(conn: Connection) extends RedisOp {
+
+  private class SyncRedis(conn: Connection) extends Redis(conn) {
+    private var lock = new Lock()
+
+    override protected def call[T](payload: Bytes)(f: Reply => T): T = {
+      try {
+        lock.acquire()
+        super.call(payload)(f)
+      } finally  {
+        lock.release()
+      }
+    }
+
+    override def pipeline(f: RedisOp => Unit): Seq[Any] = {
+      try {
+        lock.acquire()
+        super.pipeline(f)
+      } finally  {
+        lock.release()
+      }
+    }
+
+    override def multi(f: RedisOp => Unit): Seq[Any] = {
+      try {
+        lock.acquire()
+        super.multi(f)
+      } finally  {
+        lock.release()
+      }
+    }
+
+    override def watch(keys: String*) = sys.error("unsupported")
+    override def unwatch(keys: String*) = sys.error("unsupported")
+    override def subscribe(channel: String) = sys.error("unsupported")
+    override def unsubscribe(channel: String) = sys.error("unsupported")
+    override def readMessage()= sys.error("unsupported")
+
+  }
+
+  def sync: Redis = new SyncRedis(conn)
 
   private abstract class DelayedRedis extends RedisOp {
     type ReplyFunc = Function[Reply, Any]

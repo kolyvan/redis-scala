@@ -1,4 +1,4 @@
-package ru.kolyavan.redis.test
+package ru.kolyvan.redis.test
 
 import _root_.ru.kolyvan.redis._
 import org.scalatest.FunSuite
@@ -431,6 +431,8 @@ class RedisTest extends FunSuite {
     expect(0) { redis.unsubscribe("chat") }
 
   }
+
+
 
   // utils
 
