@@ -5,7 +5,8 @@ import scala.concurrent.Lock
 
 sealed abstract class RedisOp extends Request with ReplyProc {
 
-  private var dbindex = 0
+  var onreconnect: RedisOp => Unit = _
+
   protected def sendCmd(conn: Connection, payload: Bytes)(f: InputStream => Reply): Reply =  {
 
     def op() = {
@@ -19,10 +20,10 @@ sealed abstract class RedisOp extends Request with ReplyProc {
     try { op() }
     catch {
 			case e: java.net.SocketException =>
-        Redis.log("reconnect after %s to db #%d ".format(e.getMessage, dbindex))
+        Redis.log("reconnect after %s ".format(e.getMessage))
 				conn.reconnect
-        if (dbindex != 0)
-          select(dbindex)
+        if (onreconnect != null)
+          onreconnect(this)
         op()
       case e =>
         Redis.log("exception " + e.getMessage)
@@ -82,16 +83,12 @@ sealed abstract class RedisOp extends Request with ReplyProc {
   def ttl(key: String): Int =
     call(plain('ttl, key))(int)
 
-  def select(index: Int): Boolean =  {
-    this.dbindex = 0 // for preventing recursive calling select during reconnectn
-    val r = call(unified('select, index))(bool)
-    this.dbindex = index
-    r
-  }
+  def select(index: Int): Boolean = call(unified('select, index))(bool)
 
   def flushdb(): Boolean =
     call(plain('flushdb))(bool)
 
+  def auth(password: String): Boolean = call(plain('auth, password))(bool)
 
   // string ops
 
@@ -491,6 +488,7 @@ class Redis(conn: Connection) extends RedisOp {
 
   def pipeline(f: RedisOp => Unit): Seq[Any] = {
     val p = new PipelineRedis
+    p.onreconnect = this.onreconnect
     f (p)
     var r: Seq[Any] = Nil
     sendCmd(conn, Utils.zerobytes) { inp =>
@@ -507,6 +505,7 @@ class Redis(conn: Connection) extends RedisOp {
       throw ProtocolError("got false as multi-command reply")
 
     val m = new MultiRedis
+    m.onreconnect = this.onreconnect
 
     try {
       f (m)
@@ -563,7 +562,6 @@ class Redis(conn: Connection) extends RedisOp {
 
    // misc
 
-  def auth(password: String): Boolean = call(plain('auth, password))(bool)
   def dbsize() = call(plain('dbsize))(int)
   def save() = call(plain('save))(bool)
   def bgsave() = call(plain('bgsave))(bool)
@@ -589,5 +587,6 @@ object Redis {
 
   var logger: Function1[String, Unit] = null
   def log(msg: => String): Unit = if (logger != null) logger(msg)
+
 }
 

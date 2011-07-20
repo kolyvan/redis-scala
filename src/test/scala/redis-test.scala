@@ -433,6 +433,10 @@ class RedisTest extends FunSuite {
   }
 
 
+  // test("reconnect") {
+  //  def onReconnect(r: RedisOp) { r.select(15) }
+  //  redis.onreconnect = onReconnect _
+  // }
 
   // utils
 
