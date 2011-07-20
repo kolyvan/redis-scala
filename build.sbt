@@ -1,6 +1,6 @@
 name := "redis-scala"
 
-version := "0.1.3"
+version := "0.1.4"
 
 organization := "ru.kolyvan"
 
