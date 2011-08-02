@@ -5,7 +5,7 @@ import scala.concurrent.Lock
 
 sealed abstract class RedisOp extends Request with ReplyProc {
 
-  var onreconnect: RedisOp => Unit = _
+  protected def afterReconnect()
 
   protected def sendCmd(conn: Connection, payload: Bytes)(f: InputStream => Reply): Reply =  {
 
@@ -22,8 +22,7 @@ sealed abstract class RedisOp extends Request with ReplyProc {
 			case e: java.net.SocketException =>
         Redis.log("reconnect after %s ".format(e.getMessage))
 				conn.reconnect
-        if (onreconnect != null)
-          onreconnect(this)
+        afterReconnect()
         op()
       case e =>
         Redis.log("exception " + e.getMessage)
@@ -377,6 +376,9 @@ sealed abstract class RedisOp extends Request with ReplyProc {
 
 class Redis(conn: Connection) extends RedisOp {
 
+  var onreconnect: RedisOp => Unit = _
+  protected def afterReconnect() = if (onreconnect != null) onreconnect(this)
+
   private class SyncRedis(conn: Connection) extends Redis(conn) {
     private var lock = new Lock()
 
@@ -425,6 +427,9 @@ class Redis(conn: Connection) extends RedisOp {
     override def unsubscribe(channel: String) = sys.error("unsupported")
     override def readMessage()= sys.error("unsupported")
 
+    protected override def afterReconnect() = // it's ok to pass nosync Redis here otherwise deadlock
+      if (onreconnect != null) onreconnect(new Redis(conn))
+
   }
 
   def sync: Redis = new SyncRedis(conn)
@@ -433,6 +438,8 @@ class Redis(conn: Connection) extends RedisOp {
     type ReplyFunc = Function[Reply, Any]
     var funcs: List[ReplyFunc] = Nil
     def addreply(f: Reply => Any)  { funcs = f :: funcs }
+
+    protected def afterReconnect() = throw ReconnectException  // no way for graceful reconnection inside multi block
   }
 
   private class PipelineRedis extends DelayedRedis {
@@ -488,7 +495,7 @@ class Redis(conn: Connection) extends RedisOp {
 
   def pipeline(f: RedisOp => Unit): Seq[Any] = {
     val p = new PipelineRedis
-    p.onreconnect = this.onreconnect
+    // p.onreconnect = this.onreconnect
     f (p)
     var r: Seq[Any] = Nil
     sendCmd(conn, Utils.zerobytes) { inp =>
@@ -505,7 +512,7 @@ class Redis(conn: Connection) extends RedisOp {
       throw ProtocolError("got false as multi-command reply")
 
     val m = new MultiRedis
-    m.onreconnect = this.onreconnect
+    // m.onreconnect = this.onreconnect
 
     try {
       f (m)
