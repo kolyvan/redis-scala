@@ -78,6 +78,15 @@ object Conv {     // from/to bytes
   def D(x: Pair[_,_]): Pair[_,_] = X(x)(D)
   def D(x: Option[_]): Option[_] = X(x)(D)
 
+  // boolean
+
+  def B(x: Boolean):Bytes = if (x) Array(1.toByte) else Array(0.toByte)
+  implicit def T(x: Bytes): Boolean = x(0) != 0
+
+  def T(x: Seq[_]): Seq[_] = X(x)(T)
+  def T(x: Pair[_,_]): Pair[_,_] = X(x)(T)
+  def T(x: Option[_]): Option[_] = X(x)(T)
+
   // any
 
   def X[T](x: Bytes)(implicit fromBytes: Bytes => T): T = fromBytes(x)

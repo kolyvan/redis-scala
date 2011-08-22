@@ -10,13 +10,16 @@ import scala.concurrent.ops.spawn
 class MultiThreadTest extends FunSuite {
 
 
-  val redis = {
+  /*val redis = {
     val r = Redis()
     r.select(15)
     r.flushdb
     r.sync
     // r
-  }
+  }*/
+
+  val redis = SyncRedis { r => r.select(15) }
+  redis.flushdb
 
 
   test("multi-thread") {

@@ -376,65 +376,9 @@ sealed abstract class RedisOp extends Request with ReplyProc {
 
 class Redis(conn: Connection) extends RedisOp {
 
-  var onreconnect: RedisOp => Unit = _
-  protected def afterReconnect() = if (onreconnect != null) onreconnect(this)
+  protected def afterReconnect() = {}
 
-  private class SyncRedis(conn: Connection) extends Redis(conn) {
-    private var lock = new Lock()
-
-    override protected def call[T](payload: Bytes)(f: Reply => T): T = {
-      lock.acquire()
-      try { super.call(payload)(f) }
-      finally  {
-        lock.release()
-      }
-    }
-
-    override def pipeline(f: RedisOp => Unit): Seq[Any] = {
-      lock.acquire()
-      try { super.pipeline(f) }
-      finally  {
-        lock.release()
-      }
-    }
-
-    override def multi(f: RedisOp => Unit): Seq[Any] = {
-      lock.acquire()
-      try {
-        if (!super.call(unified('multi))(bool))
-          throw ProtocolError("got false as multi-command reply")
-
-        val m = new MultiRedis
-        f (m)
-        super.call(unified('exec))(m.exec)
-      }
-      catch {
-        case DiscardException =>
-          super.call(unified('discard))(bool)
-          Nil
-        case e =>
-          super.call(unified('discard))(bool)
-          throw e   // rethrow
-      }
-      finally  {
-        lock.release()
-      }
-    }
-
-    override def watch(keys: String*) = sys.error("unsupported")
-    override def unwatch(keys: String*) = sys.error("unsupported")
-    override def subscribe(channel: String) = sys.error("unsupported")
-    override def unsubscribe(channel: String) = sys.error("unsupported")
-    override def readMessage()= sys.error("unsupported")
-
-    protected override def afterReconnect() = // it's ok to pass nosync Redis here otherwise deadlock
-      if (onreconnect != null) onreconnect(new Redis(conn))
-
-  }
-
-  def sync: Redis = new SyncRedis(conn)
-
-  private abstract class DelayedRedis extends RedisOp {
+  protected abstract class DelayedRedis extends RedisOp {
     type ReplyFunc = Function[Reply, Any]
     var funcs: List[ReplyFunc] = Nil
     def addreply(f: Reply => Any)  { funcs = f :: funcs }
@@ -442,7 +386,7 @@ class Redis(conn: Connection) extends RedisOp {
     protected def afterReconnect() = throw ReconnectException  // no way for graceful reconnection inside multi block
   }
 
-  private class PipelineRedis extends DelayedRedis {
+  protected class PipelineRedis extends DelayedRedis {
 
     def call[T](payload: Bytes)(f: Reply => T): T = {
       sendCmd(conn, payload){ _ => NullReply }
@@ -455,7 +399,7 @@ class Redis(conn: Connection) extends RedisOp {
     }
   }
 
-  private class MultiRedis extends DelayedRedis {
+  protected class MultiRedis extends DelayedRedis {
 
     def call[T](payload: Bytes)(f: Reply => T): T = {
       sendCmd(conn, payload){ inp =>
@@ -585,8 +529,69 @@ class Redis(conn: Connection) extends RedisOp {
   }
 
   // object monitor config
+}
+
+
+class RedisEx(conn: Connection)(oninit: RedisOp => Unit) extends Redis(conn) {
+  oninit(this)
+  override protected def afterReconnect() = oninit(this)
+}
+
+
+class SyncRedis(conn: Connection)(oninit: RedisOp => Unit) extends Redis(conn) {
+  private var lock = new Lock()
+
+  oninit(this)
+  override protected def afterReconnect() = oninit(new Redis(conn))
+
+
+  override protected def call[T](payload: Bytes)(f: Reply => T): T = {
+    lock.acquire()
+    try { super.call(payload)(f) }
+    finally  {
+      lock.release()
+    }
+  }
+
+  override def pipeline(f: RedisOp => Unit): Seq[Any] = {
+    lock.acquire()
+    try { super.pipeline(f) }
+    finally  {
+      lock.release()
+    }
+  }
+
+  override def multi(f: RedisOp => Unit): Seq[Any] = {
+    lock.acquire()
+    try {
+      if (!super.call(unified('multi))(bool))
+        throw ProtocolError("got false as multi-command reply")
+
+      val m = new MultiRedis
+      f (m)
+      super.call(unified('exec))(m.exec)
+    }
+    catch {
+      case DiscardException =>
+        super.call(unified('discard))(bool)
+        Nil
+      case e =>
+        super.call(unified('discard))(bool)
+        throw e   // rethrow
+    }
+    finally  {
+      lock.release()
+    }
+  }
+
+  override def watch(keys: String*) = sys.error("unsupported")
+  override def unwatch(keys: String*) = sys.error("unsupported")
+  override def subscribe(channel: String) = sys.error("unsupported")
+  override def unsubscribe(channel: String) = sys.error("unsupported")
+  override def readMessage()= sys.error("unsupported")
 
 }
+
 
 object Redis {
   def apply(host: String = "localhost", port: Int =  6379, timeout: Int = 0) =
@@ -594,6 +599,16 @@ object Redis {
 
   var logger: Function1[String, Unit] = null
   def log(msg: => String): Unit = if (logger != null) logger(msg)
-
 }
 
+object RedisEx {
+  def apply(oninit: RedisOp => Unit): RedisEx = apply("localhost", 6379, 0)(oninit)
+  def apply(host: String, port: Int, timeout: Int)(oninit: RedisOp => Unit): RedisEx =
+    new RedisEx(new DefaultConnection(host, port, timeout))(oninit)
+}
+
+object SyncRedis {
+  def apply(oninit: RedisOp => Unit): SyncRedis = apply("localhost", 6379, 0)(oninit)
+  def apply(host: String, port: Int, timeout: Int)(oninit: RedisOp => Unit): SyncRedis =
+    new SyncRedis(new DefaultConnection(host, port, timeout))(oninit)
+}
